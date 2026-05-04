@@ -17,6 +17,7 @@ public class Webconfig {
                         .allowedOrigins(
                                 "https://resource-planning-ledger-frontend.onrender.com",
                                 "http://localhost:5173",
+                                "https://resource-planning-ledger-frontend-qyhq.onrender.com/",
                                 "http://localhost:3000")
                         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                         .allowedHeaders("*")

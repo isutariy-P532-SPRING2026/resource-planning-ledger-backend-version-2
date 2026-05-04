@@ -1,10 +1,12 @@
 # Resource Planning Ledger — Backend
 
-**Live API:** https://resource-planning-ledger-backend-version-5jku.onrender.com
+**Live API:** https://resource-planning-ledger-backend-version-w90h.onrender.com/
 
-**Frontend:** https://resource-planning-ledger-frontend.onrender.com
+**Frontend:** https://resource-planning-ledger-frontend-qyhq.onrender.com/
 
-**GitHub:** [isutariy-P532-SPRING2026/resource-planning-ledger-backend-version-1](https://github.com/isutariy-P532-SPRING2026/resource-planning-ledger-backend-version-1)
+**GitHub backend:** [isutariy-P532-SPRING2026/resource-planning-ledger-backend-version-2](https://github.com/isutariy-P532-SPRING2026/resource-planning-ledger-backend-version-2)
+
+**GitHub frontend:** [isutariy-P532-SPRING2026/resource-planning-ledger-frontend-version-2](https://github.com/isutariy-P532-SPRING2026/resource-planning-ledger-frontend-version-2)
 
 A Resource Planning Ledger REST API built with Java 17 + Spring Boot 3 and PostgreSQL, following a four-layer architecture (Controller → Manager → Engine → Repository) and four classic OO design patterns.
 
