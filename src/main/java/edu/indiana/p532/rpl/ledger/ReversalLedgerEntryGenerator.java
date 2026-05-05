@@ -30,6 +30,17 @@ public class ReversalLedgerEntryGenerator extends AbstractLedgerEntryGenerator {
     @Autowired
     private ResourceAllocationRepository allocationRepository;
 
+    private Long lastActionId;
+
+    @Override
+    protected LedgerTransaction createTransaction(ImplementedAction action) {
+        lastActionId = action.getProposedAction().getId();
+        LedgerTransaction tx = new LedgerTransaction(
+                "Reversal ledger for action " + lastActionId,
+                null); // null avoids unique-constraint collision with the completion transaction
+        return transactionRepository.save(tx);
+    }
+
     @Override
     public boolean appliesTo(ImplementedAction action) {
         return false;
@@ -51,7 +62,7 @@ public class ReversalLedgerEntryGenerator extends AbstractLedgerEntryGenerator {
      */
     @Override
     protected Entry buildWithdrawal(LedgerTransaction tx, ResourceAllocation a) {
-        String accountName = "USAGE-" + a.getResourceType().getName() + "-action-" + tx.getOriginatingActionId();
+        String accountName = "USAGE-" + a.getResourceType().getName() + "-action-" + lastActionId;
         Account usageAccount = accountRepository.findByName(accountName)
                 .orElseGet(() -> accountRepository.save(
                         new Account(accountName, AccountKind.USAGE, a.getResourceType().getId())));
@@ -59,7 +70,7 @@ public class ReversalLedgerEntryGenerator extends AbstractLedgerEntryGenerator {
         return new Entry(tx, usageAccount,
                 a.getQuantity().negate(), now, now,
                 "Reversal: remove " + a.getQuantity().toPlainString()
-                        + " from usage account for action " + tx.getOriginatingActionId());
+                        + " from usage account for action " + lastActionId);
     }
 
     @Override
@@ -69,13 +80,13 @@ public class ReversalLedgerEntryGenerator extends AbstractLedgerEntryGenerator {
         return new Entry(tx, poolAccount,
                 a.getQuantity(), now, now,
                 "Reversal: restore " + a.getQuantity().toPlainString()
-                        + " to pool account for action " + tx.getOriginatingActionId());
+                        + " to pool account for action " + lastActionId);
     }
 
     @Override
     protected void afterPost(LedgerTransaction tx) {
         auditLogEntryRepository.save(new AuditLogEntry(
-                "REVERSAL_POSTED", null, null, tx.getOriginatingActionId(),
-                "Reversed via ReversalLedgerEntryGenerator for action " + tx.getOriginatingActionId()));
+                "REVERSAL_POSTED", null, null, lastActionId,
+                "Reversed via ReversalLedgerEntryGenerator for action " + lastActionId));
     }
 }

@@ -7,6 +7,7 @@ import edu.indiana.p532.rpl.manager.PlanManager;
 import edu.indiana.p532.rpl.visitor.CompletionRatioVisitor;
 import edu.indiana.p532.rpl.visitor.ResourceCostVisitor;
 import edu.indiana.p532.rpl.visitor.RiskScoreVisitor;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -27,6 +28,7 @@ public class PlanMetricsController {
         this.planManager = planManager;
     }
 
+    @Transactional(readOnly = true)
     @GetMapping("/{id}/metrics")
     public Map<String, Object> getMetrics(@PathVariable Long id) {
         Plan plan = planManager.getPlanWithTree(id);

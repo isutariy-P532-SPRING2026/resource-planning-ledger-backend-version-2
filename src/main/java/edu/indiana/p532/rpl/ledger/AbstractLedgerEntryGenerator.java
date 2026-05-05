@@ -73,7 +73,7 @@ public abstract class AbstractLedgerEntryGenerator {
     /** Hook — empty by default. Week 2 AssetLedgerEntryGenerator overrides this. */
     protected void afterPost(LedgerTransaction tx) {}
 
-    private LedgerTransaction createTransaction(ImplementedAction action) {
+    protected LedgerTransaction createTransaction(ImplementedAction action) {
         LedgerTransaction tx = new LedgerTransaction(
                 "Completion ledger for action " + action.getProposedAction().getId(),
                 action.getProposedAction().getId());

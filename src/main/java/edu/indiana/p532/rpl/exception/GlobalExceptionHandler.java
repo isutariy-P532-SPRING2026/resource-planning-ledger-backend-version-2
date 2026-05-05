@@ -32,8 +32,9 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Map<String, Object>> handleIntegrityViolation(DataIntegrityViolationException ex) {
+        String rootCause = ex.getRootCause() != null ? ex.getRootCause().getMessage() : ex.getMessage();
         return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(errorBody("Cannot delete: this record is referenced by existing allocations or ledger entries."));
+                .body(errorBody("Data integrity error: " + rootCause));
     }
 
     private Map<String, Object> errorBody(String message) {
