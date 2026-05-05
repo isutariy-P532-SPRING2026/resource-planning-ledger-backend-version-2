@@ -8,7 +8,7 @@
 
 **GitHub frontend:** [isutariy-P532-SPRING2026/resource-planning-ledger-frontend-version-2](https://github.com/isutariy-P532-SPRING2026/resource-planning-ledger-frontend-version-2)
 
-A Resource Planning Ledger REST API built with Java 17 + Spring Boot 3 and PostgreSQL, following a four-layer architecture (Controller → Manager → Engine → Repository) and four classic OO design patterns.
+A Resource Planning Ledger REST API built with Java 17 + Spring Boot 3 and PostgreSQL, following a four-layer architecture (Controller → Manager → Engine → Repository) and six classic OO design patterns.
 
 ---
 
@@ -83,22 +83,30 @@ docker run -p 8080:8080 \
 | `GET` | `/api/plans/{id}` | Get plan with full node tree |
 | `POST` | `/api/plans/{id}/children` | Add a child node (action or sub-plan) |
 | `GET` | `/api/plans/{id}/report` | Depth-first traversal report with allocations |
+| `GET` | `/api/plans/{id}/report?status=X` | Report filtered to a specific action status |
+| `GET` | `/api/plans/{id}/metrics` | Completion, resource cost, and risk metrics for the plan subtree |
+| `GET` | `/api/plans/{id}/actions` | List all actions under a plan |
+| `GET` | `/api/plans/{id}/actions?status=X` | List actions filtered by status |
 
 ### Actions
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/actions/{id}` | Get action detail |
+| `GET` | `/api/actions/{id}` | Get action detail with allocations and legal transitions |
 | `POST` | `/api/actions/{id}/implement` | Transition → IN_PROGRESS |
 | `POST` | `/api/actions/{id}/complete` | Transition → COMPLETED, posts ledger entries |
-| `POST` | `/api/actions/{id}/suspend` | Transition → SUSPENDED |
+| `POST` | `/api/actions/{id}/suspend` | Transition → SUSPENDED (requires reason) |
 | `POST` | `/api/actions/{id}/resume` | Resume from SUSPENDED |
 | `POST` | `/api/actions/{id}/abandon` | Transition → ABANDONED |
+| `POST` | `/api/actions/{id}/submit-for-approval` | Transition → PENDING_APPROVAL |
+| `POST` | `/api/actions/{id}/approve` | Transition → COMPLETED (from PENDING_APPROVAL) |
+| `POST` | `/api/actions/{id}/reject` | Transition → IN_PROGRESS (from PENDING_APPROVAL) |
+| `POST` | `/api/actions/{id}/reopen` | Transition → REOPENED, reverses ledger entries |
 | `POST` | `/api/actions/{id}/allocations` | Add resource allocation |
 
 ### Accounts & Ledger
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/accounts` | List all accounts with balances |
+| `GET` | `/api/accounts` | List all accounts with balances and resource kind |
 | `GET` | `/api/accounts/{id}/entries` | Get ledger entries for an account |
 | `POST` | `/api/accounts/{id}/deposit` | Deposit to a pool account |
 
@@ -129,19 +137,20 @@ docker run -p 8080:8080 \
 
 ### 1. State — `ActionStateMachine`
 
-`ProposedAction` stores a `stateName` string resolved at runtime to a stateless Spring singleton `ActionState` bean via `ActionStateMachineEngine`. Each state class (`ProposedState`, `InProgressState`, `SuspendedState`, `CompletedState`, `AbandonedState`) encapsulates its own legal transitions and throws `IllegalStateTransitionException` for illegal ones.
+`ProposedAction` stores a `stateName` string resolved at runtime to a stateless Spring singleton `ActionState` bean via `ActionStateMachineEngine`. Each state class encapsulates its own legal transitions and throws `IllegalStateTransitionException` for illegal ones. The `ActionContext` + `ActionContextCallback` interface decouples state objects from managers, keeping them framework-agnostic and unit-testable.
 
-The `ActionContext` + `ActionContextCallback` interface decouples state objects from `ActionManager`, keeping them framework-agnostic and unit-testable without a Spring context.
-
-**State transitions:**
+**Full state transition map (Week 2):**
 ```
-PROPOSED → IN_PROGRESS (implement)
-IN_PROGRESS → COMPLETED (complete)
-IN_PROGRESS → SUSPENDED (suspend)
-IN_PROGRESS → ABANDONED (abandon)
-SUSPENDED → IN_PROGRESS (resume, if already implemented)
-SUSPENDED → PROPOSED (resume, if not yet implemented)
-SUSPENDED → ABANDONED (abandon)
+PROPOSED         → IN_PROGRESS       (implement)
+IN_PROGRESS      → PENDING_APPROVAL  (submit-for-approval)
+IN_PROGRESS      → SUSPENDED         (suspend)
+IN_PROGRESS      → ABANDONED         (abandon)
+PENDING_APPROVAL → COMPLETED         (approve)
+PENDING_APPROVAL → IN_PROGRESS       (reject)
+COMPLETED        → REOPENED          (reopen — reverses ledger entries)
+SUSPENDED        → IN_PROGRESS       (resume, if already implemented)
+SUSPENDED        → PROPOSED          (resume, if not yet implemented)
+SUSPENDED        → ABANDONED         (abandon)
 ```
 
 ### 2. Composite — `PlanNode` tree
@@ -154,9 +163,23 @@ A pure-Java stack-based `Iterator<PlanNode>` that performs depth-first pre-order
 
 ### 4. Template Method — `AbstractLedgerEntryGenerator`
 
-The ledger-entry generation skeleton (`generateEntries`) is `final` and cannot be overridden, guaranteeing double-entry conservation in `postEntries` (also `final`). Subclasses implement `selectAllocations()` and `validate()`, and may override the `afterPost()` hook. `LedgerEngine` injects `List<AbstractLedgerEntryGenerator>` — new generators are added as new `@Component` subclasses with zero changes to existing code.
+The ledger-entry generation skeleton (`generateEntries`) is `final` and cannot be overridden, guaranteeing double-entry conservation in `postEntries` (also `final`). Subclasses implement `selectAllocations()` and `validate()`, and may override the `buildWithdrawal()`, `buildDeposit()`, and `afterPost()` hooks.
 
-Each completed action produces a `TRANSACTION_POSTED` audit entry that captures both the debit and credit sides plus a sum-to-zero verification.
+`LedgerEngine` injects `List<AbstractLedgerEntryGenerator>` — new generators are added as new `@Component` subclasses with zero changes to existing code. `ReversalLedgerEntryGenerator` is called explicitly by `ActionApprovalManager.reopen()` to reverse all ledger entries for a completed action, restoring pool balances.
+
+### 5. Visitor — `PlanNodeVisitor` (Week 2)
+
+Three visitor implementations traverse the plan tree via `DepthFirstPlanIterator`:
+
+- **`CompletionRatioVisitor`** — counts completed vs total actions, computes completion ratio
+- **`ResourceCostVisitor`** — accumulates total allocated quantity per resource type across all leaf actions (uses `loadedAllocations` pre-fetched by `PlanManager`)
+- **`RiskScoreVisitor`** — scores risk from action status distribution (ABANDONED=3pts, SUSPENDED=2pts, PROPOSED=1pt); classifies as LOW / MEDIUM / HIGH
+
+Results returned as `{completion, resourceCost, risk}` by `GET /api/plans/{id}/metrics`.
+
+### 6. Strategy — `PostingRuleEngine`
+
+`PostingRuleEngine` holds a list of `PostingRule` strategy implementations. After each ledger entry is saved, all applicable rules fire against that entry and its account (e.g., `OverConsumptionAlertRule` fires when a pool balance goes negative and writes an `OVER_CONSUMPTION_ALERT` audit entry).
 
 ---
 
@@ -169,7 +192,7 @@ HTTP/JSON    Business logic  Algorithms   Spring Data JPA
 ```
 
 - **Controllers** — thin REST layer, no business logic
-- **Managers** — orchestrate transactions, delegate to engines/repos
+- **Managers** — orchestrate transactions, delegate to engines/repos (`ActionManager`, `ActionApprovalManager`, `LedgerManager`, `PlanManager`, `ReportManager`)
 - **Engines** — stateless algorithms (`ActionStateMachineEngine`, `LedgerEngine`, `PlanInstantiationEngine`, `PostingRuleEngine`)
 - **Repositories** — Spring Data JPA interfaces
 
@@ -181,3 +204,10 @@ HTTP/JSON    Business logic  Algorithms   Spring Data JPA
 2. Create a **PostgreSQL** database (free tier).
 3. Set environment variables: `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`.
 4. `spring.jpa.hibernate.ddl-auto=update` auto-creates and migrates the schema on startup.
+
+> **Note:** `ddl-auto=update` adds new columns and tables but never removes existing check constraints. If new enum values are added to `ActionStatus`, run the following SQL migration on the live database:
+> ```sql
+> ALTER TABLE implemented_actions DROP CONSTRAINT implemented_actions_status_check;
+> ALTER TABLE implemented_actions ADD CONSTRAINT implemented_actions_status_check
+>   CHECK (status IN ('PROPOSED', 'PENDING_APPROVAL', 'IN_PROGRESS', 'SUSPENDED', 'COMPLETED', 'REOPENED', 'ABANDONED'));
+> ```
