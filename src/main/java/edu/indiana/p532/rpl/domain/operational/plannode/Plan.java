@@ -55,7 +55,9 @@ public class Plan extends PlanNodeEntity {
                 case PROPOSED:
                     hasProposed = true;
                     break;
+                case PENDING_APPROVAL:
                 case IN_PROGRESS:
+                case REOPENED:
                     hasInProgress = true;
                     break;
                 case COMPLETED:

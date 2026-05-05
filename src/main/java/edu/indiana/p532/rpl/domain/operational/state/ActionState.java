@@ -1,5 +1,7 @@
 package edu.indiana.p532.rpl.domain.operational.state;
 
+import edu.indiana.p532.rpl.exception.IllegalStateTransitionException;
+
 import java.util.List;
 
 /**
@@ -7,8 +9,10 @@ import java.util.List;
  * All mutable data lives in ActionContext (wrapping the JPA entity).
  *
  * legalTransitions() is declared here so ActionController never needs to change
- * when a new state is added in Week 2 — each state knows its own outgoing edges.
- * Adding a new state = new class + ONE existing state gains an outgoing edge.
+ * when a new state is added — each state knows its own outgoing edges.
+ *
+ * Week 2: submitForApproval/approve/reject/reopen added as default-throw methods
+ * so existing states need zero changes.
  */
 public interface ActionState {
     void implement(ActionContext ctx);
@@ -20,4 +24,22 @@ public interface ActionState {
 
     /** Returns the event names that are legal to call from this state. */
     List<String> legalTransitions();
+
+    // --- Week 2 transitions — default: throw; overridden only by states that allow them ---
+
+    default void submitForApproval(ActionContext ctx) {
+        throw new IllegalStateTransitionException(name(), "submitForApproval");
+    }
+
+    default void approve(ActionContext ctx) {
+        throw new IllegalStateTransitionException(name(), "approve");
+    }
+
+    default void reject(ActionContext ctx) {
+        throw new IllegalStateTransitionException(name(), "reject");
+    }
+
+    default void reopen(ActionContext ctx) {
+        throw new IllegalStateTransitionException(name(), "reopen");
+    }
 }

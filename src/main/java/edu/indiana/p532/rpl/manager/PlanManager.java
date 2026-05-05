@@ -42,7 +42,6 @@ public class PlanManager {
                     request.name(), protocol, request.targetStartDate());
             return planRepository.save(plan);
         }
-        // scratch plan (no protocol)
         Plan plan = new Plan(request.name(), null, request.targetStartDate());
         return planRepository.save(plan);
     }
@@ -51,7 +50,6 @@ public class PlanManager {
     public Plan getPlanWithTree(Long id) {
         Plan plan = planRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Plan not found: " + id));
-        // force-load children recursively so the iterator works in-memory
         loadChildrenRecursively(plan);
         return plan;
     }
@@ -59,17 +57,10 @@ public class PlanManager {
     @Transactional(readOnly = true)
     public List<Plan> listTopLevel() {
         List<Plan> plans = planRepository.findTopLevel();
-        // Must force-load the full tree in-transaction; open-in-view=false means lazy
-        // proxies are dead outside the transaction boundary.
         plans.forEach(this::loadChildrenRecursively);
         return plans;
     }
 
-    /**
-     * Adds a child node (sub-plan or action) to an existing plan node.
-     * type = "PLAN" creates a sub-plan composite; anything else creates a leaf action.
-     * The caller is responsible for reloading the tree after this call.
-     */
     @Transactional
     public void addChild(Long parentId, String name, String type) {
         Plan parent = planRepository.findById(parentId)
@@ -82,19 +73,11 @@ public class PlanManager {
         planRepository.save(parent);
     }
 
-    /**
-     * Recursively forces JPA lazy collections and populates the @Transient
-     * loadedAllocations on every ProposedAction leaf so the iterator and report
-     * can work purely in-memory without hitting the DB outside a transaction.
-     */
-        private void loadChildrenRecursively(Plan plan) {
+    private void loadChildrenRecursively(Plan plan) {
         plan.getChildren().forEach(child -> {
             if (child instanceof Plan subPlan) {
                 loadChildrenRecursively(subPlan);
             } else {
-                // Polymorphic — each leaf type loads its own allocations.
-                // Week-2 new leaf types override PlanNode.loadAllocations(),
-                // so this method never needs changing again.
                 child.loadAllocations(allocationRepository);
             }
         });

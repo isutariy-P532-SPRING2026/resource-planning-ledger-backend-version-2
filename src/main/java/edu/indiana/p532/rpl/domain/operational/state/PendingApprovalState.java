@@ -6,8 +6,13 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 
+/**
+ * Week 2 state: action has been submitted for approval but not yet approved.
+ * approve() → IN_PROGRESS (creates ImplementedAction).
+ * reject()  → PROPOSED    (returns to requester for revision).
+ */
 @Component
-public class CompletedState implements ActionState {
+public class PendingApprovalState implements ActionState {
 
     @Override
     public void implement(ActionContext ctx) {
@@ -31,21 +36,24 @@ public class CompletedState implements ActionState {
 
     @Override
     public void abandon(ActionContext ctx) {
-        throw new IllegalStateTransitionException(name(), "abandon");
-    }
-
-    /**
-     * Week 2: COMPLETED → REOPENED.
-     * Reversal ledger entries are created by ActionApprovalManager after this transition.
-     */
-    @Override
-    public void reopen(ActionContext ctx) {
-        ctx.transitionTo(ActionStatus.REOPENED);
+        ctx.transitionTo(ActionStatus.ABANDONED);
+        ctx.recordAbandon();
     }
 
     @Override
-    public String name() { return ActionStatus.COMPLETED.name(); }
+    public void approve(ActionContext ctx) {
+        ctx.transitionTo(ActionStatus.IN_PROGRESS);
+        ctx.createImplementedAction();
+    }
 
     @Override
-    public List<String> legalTransitions() { return List.of("reopen"); }
+    public void reject(ActionContext ctx) {
+        ctx.transitionTo(ActionStatus.PROPOSED);
+    }
+
+    @Override
+    public String name() { return ActionStatus.PENDING_APPROVAL.name(); }
+
+    @Override
+    public List<String> legalTransitions() { return List.of("approve", "reject", "abandon"); }
 }

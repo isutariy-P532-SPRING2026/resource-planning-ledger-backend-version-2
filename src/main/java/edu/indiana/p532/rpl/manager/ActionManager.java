@@ -12,6 +12,7 @@ import edu.indiana.p532.rpl.dto.ResourceAllocationRequest;
 import edu.indiana.p532.rpl.dto.SuspendRequest;
 import edu.indiana.p532.rpl.engine.ActionStateMachineEngine;
 import edu.indiana.p532.rpl.exception.ResourceNotFoundException;
+import edu.indiana.p532.rpl.ledger.AssetLedgerEntryGenerator;
 import edu.indiana.p532.rpl.repository.*;
 import edu.indiana.p532.rpl.domain.knowledge.ResourceType;
 import edu.indiana.p532.rpl.domain.operational.ResourceAllocation;
@@ -36,6 +37,7 @@ public class ActionManager implements ActionContextCallback {
     private final AuditLogEntryRepository auditLogEntryRepository;
     private final ActionStateMachineEngine stateMachineEngine;
     private final LedgerManager ledgerManager;
+    private final AssetLedgerEntryGenerator assetLedgerEntryGenerator;
 
     public ActionManager(ProposedActionRepository actionRepository,
                          ImplementedActionRepository implementedActionRepository,
@@ -44,7 +46,8 @@ public class ActionManager implements ActionContextCallback {
                          ResourceTypeRepository resourceTypeRepository,
                          AuditLogEntryRepository auditLogEntryRepository,
                          ActionStateMachineEngine stateMachineEngine,
-                         LedgerManager ledgerManager) {
+                         LedgerManager ledgerManager,
+                         AssetLedgerEntryGenerator assetLedgerEntryGenerator) {
         this.actionRepository = actionRepository;
         this.implementedActionRepository = implementedActionRepository;
         this.suspensionRepository = suspensionRepository;
@@ -53,6 +56,7 @@ public class ActionManager implements ActionContextCallback {
         this.auditLogEntryRepository = auditLogEntryRepository;
         this.stateMachineEngine = stateMachineEngine;
         this.ledgerManager = ledgerManager;
+        this.assetLedgerEntryGenerator = assetLedgerEntryGenerator;
     }
 
     @Transactional
@@ -104,21 +108,20 @@ public class ActionManager implements ActionContextCallback {
     }
 
     /**
-     * Generic transition dispatcher — maps event name to existing state-machine
-     * methods. Week 2 new states only need a new ActionState bean registered via
-     * Spring DI plus a new case here; ActionController never changes.
+     * Generic transition dispatcher. ActionApprovalController handles the
+     * approval-workflow events (approve, reject, reopen, submitForApproval).
      */
     @Transactional
-    public ProposedAction executeTransition(Long id, String event, java.util.Map<String, String> params) {
+    public ProposedAction executeTransition(Long id, String event, Map<String, String> params) {
         return switch (event.toLowerCase()) {
-            case "implement" -> implement(id, new ImplementActionRequest(
+            case "implement"  -> implement(id, new ImplementActionRequest(
                     params.getOrDefault("actualParty", ""),
                     params.getOrDefault("actualLocation", ""),
                     null));
-            case "complete"  -> complete(id);
-            case "suspend"   -> suspend(id, new SuspendRequest(params.getOrDefault("reason", "Suspended")));
-            case "resume"    -> resume(id);
-            case "abandon"   -> abandon(id);
+            case "complete"   -> complete(id);
+            case "suspend"    -> suspend(id, new SuspendRequest(params.getOrDefault("reason", "Suspended")));
+            case "resume"     -> resume(id);
+            case "abandon"    -> abandon(id);
             default -> throw new IllegalArgumentException("Unknown transition event: " + event);
         };
     }
@@ -139,38 +142,22 @@ public class ActionManager implements ActionContextCallback {
         return load(id);
     }
 
-    /** Returns the ImplementedAction for an action that has been started, or empty. */
     @Transactional(readOnly = true)
-    public java.util.Optional<ImplementedAction> getImplementedAction(Long proposedActionId) {
+    public Optional<ImplementedAction> getImplementedAction(Long proposedActionId) {
         return implementedActionRepository.findByProposedActionId(proposedActionId);
     }
 
-        /**
-     * Returns all allocations for an action — both PROPOSED_ACTION (planned)
-     * and IMPLEMENTED_ACTION (Week-2 actual asset records).
-     * ActionController.toMap() calls this so the response is always complete.
-     */
     @Transactional(readOnly = true)
-    public java.util.List<ResourceAllocation> getAllocations(Long actionId) {
-        // Fetch planned allocations (ProposedAction level)
-        java.util.List<ResourceAllocation> result = new java.util.ArrayList<>(
+    public List<ResourceAllocation> getAllocations(Long actionId) {
+        List<ResourceAllocation> result = new ArrayList<>(
             allocationRepository.findByActionIdAndActionType(actionId, "PROPOSED_ACTION"));
-
-        // Fetch implemented allocations if an ImplementedAction exists (Week-2 asset records)
         implementedActionRepository.findByProposedActionId(actionId).ifPresent(impl ->
             result.addAll(
                 allocationRepository.findByActionIdAndActionType(impl.getId(), "IMPLEMENTED_ACTION"))
         );
-
         return result;
     }
 
-    /**
-     * Returns all fields needed by the action detail page, with all lazy associations
-     * force-loaded inside a single @Transactional boundary. This prevents
-     * LazyInitializationException when the controller accesses resourceType.getName()
-     * or implementedAction fields on detached entities.
-     */
     @Transactional(readOnly = true)
     public Map<String, Object> getDetailAsMap(Long id) {
         return buildDetailMap(load(id));
@@ -198,7 +185,7 @@ public class ActionManager implements ActionContextCallback {
         map.put("allocations", allocs.stream().map(al -> {
             Map<String, Object> am = new LinkedHashMap<>();
             am.put("id",               al.getId());
-            am.put("resourceTypeName", al.getResourceType().getName()); // safe: inside @Transactional
+            am.put("resourceTypeName", al.getResourceType().getName());
             am.put("quantity",         al.getQuantity());
             am.put("kind",             al.getKind().name());
             am.put("assetId",          al.getAssetId()    != null ? al.getAssetId()    : "");
@@ -218,7 +205,7 @@ public class ActionManager implements ActionContextCallback {
         return map;
     }
 
-    // --- ActionContextCallback implementation ---
+    // --- ActionContextCallback ---
 
     @Override
     public void onImplement(ProposedAction action, String actualParty, String actualLocation, Instant actualStart) {
@@ -231,6 +218,11 @@ public class ActionManager implements ActionContextCallback {
         suspensionRepository.save(new Suspension(action, reason));
     }
 
+    /**
+     * Change 2: after the consumable ledger entries (via LedgerEngine), explicitly
+     * call AssetLedgerEntryGenerator for SPECIFIC asset allocations.
+     * AssetLedgerEntryGenerator.appliesTo() returns false so LedgerEngine skips it.
+     */
     @Override
     public void onComplete(ProposedAction action) {
         ImplementedAction impl = implementedActionRepository.findByProposedActionId(action.getId())
@@ -238,7 +230,8 @@ public class ActionManager implements ActionContextCallback {
                         "No ImplementedAction found for action " + action.getId()));
         impl.setStatus(edu.indiana.p532.rpl.domain.ActionStatus.COMPLETED);
         implementedActionRepository.save(impl);
-        ledgerManager.generateLedgerEntries(impl);
+        ledgerManager.generateLedgerEntries(impl);         // consumables via LedgerEngine
+        assetLedgerEntryGenerator.generateEntries(impl);   // SPECIFIC assets — Change 2
     }
 
     @Override

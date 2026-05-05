@@ -11,8 +11,13 @@ public class ProposedState implements ActionState {
 
     @Override
     public void implement(ActionContext ctx) {
-        ctx.transitionTo(ActionStatus.IN_PROGRESS);
-        ctx.createImplementedAction();
+        throw new IllegalStateTransitionException(name(), "implement");
+    }
+
+    @Override
+    public void submitForApproval(ActionContext ctx) {
+        ctx.transitionTo(ActionStatus.PENDING_APPROVAL);
+        // ImplementedAction is NOT created here — that happens only on approve().
     }
 
     @Override
@@ -41,5 +46,7 @@ public class ProposedState implements ActionState {
     public String name() { return ActionStatus.PROPOSED.name(); }
 
     @Override
-    public List<String> legalTransitions() { return List.of("implement", "suspend", "abandon"); }
+    public List<String> legalTransitions() {
+        return List.of("submitForApproval", "suspend", "abandon");
+    }
 }

@@ -1,5 +1,6 @@
 package edu.indiana.p532.rpl.controller;
 
+import edu.indiana.p532.rpl.domain.ActionStatus;
 import edu.indiana.p532.rpl.domain.operational.plannode.Plan;
 import edu.indiana.p532.rpl.domain.operational.plannode.PlanNodeEntity;
 import edu.indiana.p532.rpl.domain.operational.plannode.ProposedAction;
@@ -8,6 +9,7 @@ import edu.indiana.p532.rpl.dto.PlanNodeDto;
 import edu.indiana.p532.rpl.dto.ReportNodeDto;
 import edu.indiana.p532.rpl.engine.ActionStateMachineEngine;
 import edu.indiana.p532.rpl.manager.PlanManager;
+import edu.indiana.p532.rpl.manager.PlanReportManager;
 import edu.indiana.p532.rpl.manager.ReportManager;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -21,12 +23,15 @@ public class PlanController {
 
     private final PlanManager planManager;
     private final ReportManager reportManager;
+    private final PlanReportManager planReportManager;
     private final ActionStateMachineEngine stateMachineEngine;
 
     public PlanController(PlanManager planManager, ReportManager reportManager,
+                           PlanReportManager planReportManager,
                            ActionStateMachineEngine stateMachineEngine) {
         this.planManager = planManager;
         this.reportManager = reportManager;
+        this.planReportManager = planReportManager;
         this.stateMachineEngine = stateMachineEngine;
     }
 
@@ -47,7 +52,12 @@ public class PlanController {
     }
 
     @GetMapping("/{id}/report")
-    public List<ReportNodeDto> report(@PathVariable Long id) {
+    public List<ReportNodeDto> report(@PathVariable Long id,
+                                      @RequestParam(required = false) String status) {
+        if (status != null) {
+            ActionStatus filter = ActionStatus.valueOf(status.toUpperCase());
+            return planReportManager.generateReport(id, filter);
+        }
         return reportManager.generateReport(id);
     }
 
