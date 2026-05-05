@@ -1,35 +1,34 @@
 package edu.indiana.p532.rpl.controller;
 
+import edu.indiana.p532.rpl.domain.ResourceKind;
+import edu.indiana.p532.rpl.domain.knowledge.ResourceType;
 import edu.indiana.p532.rpl.domain.operational.Account;
 import edu.indiana.p532.rpl.domain.operational.Entry;
 import edu.indiana.p532.rpl.dto.AccountDto;
 import edu.indiana.p532.rpl.dto.EntryDto;
 import edu.indiana.p532.rpl.manager.LedgerManager;
+import edu.indiana.p532.rpl.repository.ResourceTypeRepository;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
-import java.util.Map;
-
-import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/accounts")
 public class AccountController {
 
     private final LedgerManager ledgerManager;
+    private final ResourceTypeRepository resourceTypeRepository;
 
-    public AccountController(LedgerManager ledgerManager) {
+    public AccountController(LedgerManager ledgerManager, ResourceTypeRepository resourceTypeRepository) {
         this.ledgerManager = ledgerManager;
+        this.resourceTypeRepository = resourceTypeRepository;
     }
 
     @GetMapping
     public List<AccountDto> listAccounts() {
-        return ledgerManager.getAllAccounts().stream().map(acc -> {
-            BigDecimal balance = ledgerManager.getBalance(acc.getId());
-            return new AccountDto(acc.getId(), acc.getName(), acc.getKind().name(),
-                    balance, balance.compareTo(BigDecimal.ZERO) < 0);
-        }).toList();
+        return ledgerManager.getAllAccounts().stream().map(this::toAccountDto).toList();
     }
 
     @PostMapping("/{id}/deposit")
@@ -37,10 +36,7 @@ public class AccountController {
         BigDecimal amount = new BigDecimal(body.get("amount").toString());
         String description = body.getOrDefault("description", "Stock deposit").toString();
         ledgerManager.depositToPool(id, amount, description);
-        Account acc = ledgerManager.getAccountById(id);
-        BigDecimal balance = ledgerManager.getBalance(acc.getId());
-        return new AccountDto(acc.getId(), acc.getName(), acc.getKind().name(),
-                balance, balance.compareTo(BigDecimal.ZERO) < 0);
+        return toAccountDto(ledgerManager.getAccountById(id));
     }
 
     @GetMapping("/{id}/entries")
@@ -48,6 +44,15 @@ public class AccountController {
         return ledgerManager.getEntriesForAccount(id).stream()
                 .map(this::toDto)
                 .toList();
+    }
+
+    private AccountDto toAccountDto(Account acc) {
+        BigDecimal balance = ledgerManager.getBalance(acc.getId());
+        ResourceKind rk = acc.getResourceTypeId() == null ? null
+                : resourceTypeRepository.findById(acc.getResourceTypeId())
+                        .map(ResourceType::getKind).orElse(null);
+        return new AccountDto(acc.getId(), acc.getName(), acc.getKind().name(),
+                balance, balance.compareTo(BigDecimal.ZERO) < 0, rk);
     }
 
     private EntryDto toDto(Entry e) {

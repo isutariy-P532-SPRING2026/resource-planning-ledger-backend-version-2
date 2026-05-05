@@ -1,5 +1,6 @@
 package edu.indiana.p532.rpl.dto;
 
+import edu.indiana.p532.rpl.domain.ResourceKind;
 import java.math.BigDecimal;
 
 public record AccountDto(
@@ -7,5 +8,6 @@ public record AccountDto(
         String name,
         String kind,
         BigDecimal balance,
-        boolean belowZero
+        boolean belowZero,
+        ResourceKind resourceKind
 ) {}
